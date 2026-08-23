@@ -1,0 +1,8 @@
+# Core harness (reproduce the paper's results):
+litellm>=1.50      # provider-agnostic LLM calls (all evaluated models)
+requests>=2.28      # GitHub REST tools
+pydantic>=2.0       # run/result schemas
+pyyaml>=6.0         # model + prompt configs
+
+# Optional:
+python-dotenv       # load a local .env of provider keys (falls back gracefully if absent)

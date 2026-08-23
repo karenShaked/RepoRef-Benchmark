@@ -1,0 +1,16 @@
+system_prompt: |
+   
+
+# Planning prompt — prepended to the user message to elicit a search plan
+# before the agent starts using tools.
+planning_prompt: |
+   
+
+user_prompt_template: |
+  CONVERSATION:
+  The following is a chat from the {channel} channel.
+  ---
+  {filtered_csv_messages}
+  ---
+
+  What is the actual {entity_type} number/identifier? Return ONLY the identifier.

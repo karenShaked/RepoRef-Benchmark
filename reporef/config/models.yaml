@@ -1,0 +1,89 @@
+models:
+
+  gemini-3-flash:
+    provider: google
+    model_id: "gemini-3-flash-preview"
+    tier: 2
+    supports_tool_calling: true
+    temperature: 1.0            # Gemini 3 recommends NOT lowering temperature
+    max_tokens: 4096
+
+  gemini-2-5-flash-lite:
+    provider: google
+    model_id: "gemini-2.5-flash-lite"
+    tier: 3
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+
+  # Anthropic — Claude SDK agents
+  claude-sonnet-4-6:
+    provider: anthropic
+    model_id: "claude-sonnet-4-6"
+    tier: 1
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+
+  
+  # OpenAI — GPT-5 mini ($0.25/$2.00 per MTok; ~$17 for full 505 sweep)
+  gpt-5-mini:
+    provider: openai
+    model_id: "gpt-5-mini"
+    tier: 3
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+
+  # DeepSeek — V4 Pro 
+  deepseek-v4-pro:
+    provider: deepseek
+    model_id: "deepseek-v4-pro"
+    tier: 2
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+
+  
+  # xAI — Grok 4.1 Fast (Reasoning)
+  grok-4-1-fast-reasoning:
+    provider: xai
+    model_id: "grok-4-1-fast-reasoning"
+    tier: 2
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+
+  # Meta — Llama 3.3 70B Instruct via OpenRouter.
+  llama-3-3-70b:
+    provider: openrouter
+    model_id: "meta-llama/llama-3.3-70b-instruct"
+    tier: 2
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+    note: "Set OPENROUTER_API_KEY. Tool-callable Meta baseline."
+
+  # ── Optional ablation: same xAI model with reasoning OFF.
+  # Run alongside grok-4-1-fast-reasoning to demonstrate the
+  # impact of reasoning mode within a single model family.
+  grok-4-1-fast-non-reasoning:
+    provider: xai
+    model_id: "grok-4-1-fast-non-reasoning"
+    tier: 2
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+    note: "Ablation pair for grok-4-1-fast-reasoning. Same price ($0.20/$0.50)."
+
+  # Z.ai — GLM-5.1 ($1.40/$4.40 per MTok)
+  glm-5-1:
+    provider: zai
+    model_id: "glm-5.1"
+    tier: 2
+    supports_tool_calling: true
+    temperature: 0
+    max_tokens: 4096
+    note: "Z.ai flagship long-horizon model. Auth via Z_AI_KEY in .env."
+
+budgets: [1, 3, 8, 999]  # 999 = unlimited (capped at 999 for safety)

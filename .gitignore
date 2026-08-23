@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+reporef/cache/
+predictions.jsonl
+.env
+.DS_Store
+runs/
+
+# internal-only tests (not published)
+tests/
+.pytest_cache/
