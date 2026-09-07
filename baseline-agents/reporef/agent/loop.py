@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from .adapters import LiteLLMAdapter, NormalizedResponse
 from .parsers import extract_github_url
-from ..tools.registry import ToolRegistry
+from benchmark.tools.registry import ToolRegistry
 
 
 @dataclass

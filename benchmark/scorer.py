@@ -74,7 +74,7 @@ class Scorer:
                     self.gold[r["id"]] = r
             data_dir = data_dir or gold_path.parent.parent   # data/gold/x.jsonl -> data/
         if data_dir is None:                        # aliases-only mode (scoring by record)
-            data_dir = Path(__file__).resolve().parent.parent / "data"
+            data_dir = Path(__file__).resolve().parent / "data"
         self.aliases = {}
         for p in (redirect_map_path or data_dir / "redirect_map.json",
                   duplicates_path or data_dir / "duplicates.json"):

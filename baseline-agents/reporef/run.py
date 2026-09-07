@@ -4,7 +4,7 @@
     export GEMINI_API_KEY=...           # provider key for the chosen model (see config/models.yaml)
     python -m reporef.run --model gemini-3-flash --split main --budget 10
 
-Writes predictions.jsonl and prints accuracy (via reporef.scorer).
+Writes predictions.jsonl and prints accuracy (via benchmark.scorer).
 Per-run traces are written under runs/<model>/budget_<b>/.
 """
 from __future__ import annotations
@@ -16,12 +16,12 @@ class _DropGeminiTempWarning(logging.Filter):
         return "planned for removal" not in record.getMessage()
 logging.getLogger("LiteLLM").addFilter(_DropGeminiTempWarning())
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 SPLITS = {
-    "main":     ("data/main/instances.jsonl",            "data/gold/main.jsonl"),
-    "extended": ("data/extras/extended/instances.jsonl", "data/extras/extended/gold.jsonl"),
+    "main":     ("benchmark/data/main/instances.jsonl",            "benchmark/data/gold/main.jsonl"),
+    "extended": ("benchmark/data/extras/extended/instances.jsonl", "benchmark/data/extras/extended/gold.jsonl"),
 }
 
 
@@ -38,7 +38,7 @@ def main():
     import yaml
     from .runners.single_run import run_single
     from .data.loader import load_examples
-    from .scorer import Scorer
+    from benchmark.scorer import Scorer
 
     models = yaml.safe_load((CONFIG_DIR / "models.yaml").read_text())["models"]
     if args.model not in models:

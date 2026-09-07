@@ -28,7 +28,7 @@ export GEMINI_API_KEY=...          # provider key for the model you run (see con
 ## Quickstart — reproduce the results
 
 ```bash
-python -m reporef.run --model gemini-3-flash --split main --budget 10
+python run.py --model gemini-3-flash --split main --budget 10
 ```
 
 This runs the exact ReAct harness from the paper: a `LiteLLM`-backed agent with the 22
@@ -40,7 +40,7 @@ API key for whichever you run.
 
 Score any predictions file directly:
 ```bash
-python -m reporef.scorer --gold data/gold/main.jsonl --predictions predictions.jsonl
+python -m benchmark.scorer --gold benchmark/data/gold/main.jsonl --predictions predictions.jsonl
 ```
 
 ---
@@ -84,14 +84,37 @@ differs from the current canonical URL (issue↔PR path, or a since-migrated rep
 
 ---
 
+## Tools
+
+The benchmark ships the **21 read-only GitHub tools** an agent uses to resolve a reference.
+They live in `benchmark/tools/` and are independent of any agent — load them directly:
+
+```python
+from benchmark.tools.registry import ToolRegistry
+tools = ToolRegistry(github_token=os.environ["GITHUB_TOKEN"])
+result = tools.execute("search_issues", {"query": "repo:cucumber/cucumber-jvm datatable"})
+```
+
+| Group | Tools |
+|---|---|
+| **Search** | `search_issues`, `search_code`, `search_pull_requests`, `search_repositories`, `search_users` |
+| **Issues** | `issue_read` (get / comments / sub-issues / labels), `list_issues` |
+| **Pull requests** | `pull_request_read` (get / diff / status / files / reviews / comments), `list_pull_requests` |
+| **Commits** | `get_commit`, `list_commits` |
+| **Branches / tags / releases** | `list_branches`, `list_tags`, `get_tag`, `list_releases`, `get_latest_release`, `get_release_by_tag` |
+| **Labels** | `list_label`, `get_label` |
+| **Files** | `get_file_contents`, `get_repository_tree` |
+
+---
+
 ## Use your own model or agent
 
 - **Your own model** — add an entry under `models:` in `reporef/config/models.yaml` (any
   provider LiteLLM supports: `provider`, `model_id`, `temperature`, `max_tokens`, optional
   `thinking_budget`/`reasoning_effort`), set its API key, and run `--model <your-key>`.
-- **Your own agent/strategy** — build any loop you like on `reporef.tools.registry.ToolRegistry`
-  (the 22 read-only GitHub tools) and score with `reporef.scorer.Scorer`. Load examples with
-  `reporef.data.loader.load_examples("data/main/instances.jsonl", "data/gold/main.jsonl")`.
+- **Your own agent/strategy** — build any loop you like on `benchmark.tools.registry.ToolRegistry`
+  (the 22 read-only GitHub tools) and score with `benchmark.scorer.Scorer,`. Load examples with
+  `reporef.data.loader.load_examples("benchmark/data/main/instances.jsonl", "benchmark/data/gold/main.jsonl")`.
 
 Tool calls hit **live GitHub** and cache every response under `reporef/cache/`, so re-runs are
 reproducible and offline-replayable; ship a warmed cache to let others reproduce a run without
@@ -112,8 +135,8 @@ Exact-match, but forgiving about URL *form* while strict about *which artifact*:
    artifacts (`duplicates.json`) are resolved before comparing.
 
 ```python
-from reporef.scorer import Scorer
-s = Scorer("data/gold/main.jsonl")
+from benchmark.scorer import Scorer
+s = Scorer("benchmark/data/gold/main.jsonl")
 s.is_correct("JSPM_2015-01-07_pr_17", "https://github.com/jspm/jspm.io/pull/17")  # True
 ```
 
@@ -139,7 +162,7 @@ An additional ~1.5k instances live under `data/extras/extended/`
 Use them for scale (more training/analysis signal); use `main` for reporting benchmark results.
 
 ```bash
-python -m reporef.run --model gemini-3-flash --split extended --budget 10
+python run.py --model gemini-3-flash --split extended --budget 10
 ```
 
 ---

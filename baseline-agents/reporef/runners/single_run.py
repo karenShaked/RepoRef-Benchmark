@@ -12,8 +12,8 @@ from ..agent.adapters import LiteLLMAdapter
 from ..agent.architectures import run_loop
 from ..agent.loop import AgentTrace
 from ..data.schemas import Example, EvaluationResult, RunResult, RunTrace, StepTrace
-from ..scorer import Scorer
-from ..tools.registry import ToolRegistry
+from benchmark.scorer import Scorer
+from benchmark.tools.registry import ToolRegistry
 
 # One scorer instance (loads redirect_map + duplicates from data/); scores by gold record.
 _SCORER = Scorer()
