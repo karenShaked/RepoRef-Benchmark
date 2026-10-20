@@ -16,6 +16,7 @@ GitHub MCP server read-only tools (22 tools + submit_answer):
 """
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from benchmark.repos import canonical_repo, canonicalize_query, has_repo_qualifier
@@ -923,9 +924,18 @@ class ToolRegistry:
         scrubs forbidden repo references from search results.
         """
         try:
-            # --- Pre-execution: block calls targeting forbidden repos ---
+            # Renamed repos: search rejects the old name, so use the current one.
+            # Done first so the forbidden-repo checks see the canonical name.
+            arguments = dict(arguments)
             owner = arguments.get("owner", "")
             repo = arguments.get("repo", "")
+            if owner and repo:
+                owner, repo = canonical_repo(f"{owner}/{repo}").split("/", 1)
+                arguments["owner"], arguments["repo"] = owner, repo
+            if arguments.get("query"):
+                arguments["query"] = canonicalize_query(arguments["query"])
+
+            # --- Pre-execution: block calls targeting forbidden repos ---
             if owner and repo and self._is_forbidden_repo(owner, repo):
                 return {
                     "error": (
@@ -942,14 +952,6 @@ class ToolRegistry:
                         "Reformulate your search without referencing it."
                     )
                 }
-
-            # Renamed repos: search rejects the old name, so use the current one.
-            arguments = dict(arguments)
-            if owner and repo:
-                owner, repo = canonical_repo(f"{owner}/{repo}").split("/", 1)
-                arguments["owner"], arguments["repo"] = owner, repo
-            if query:
-                arguments["query"] = canonicalize_query(query)
 
             # ------ Search ------
             if tool_name == "search_issues":
@@ -1023,7 +1025,7 @@ class ToolRegistry:
                 )
             elif tool_name == "search_users":
                 q = arguments["query"]
-                if "type:" not in q:
+                if not re.search(r"(?<!\w)type:", q, re.IGNORECASE):
                     q = f"type:user {q}"
                 return self._search_client.search_users(
                     query=q,

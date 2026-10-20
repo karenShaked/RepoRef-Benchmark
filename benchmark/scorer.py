@@ -28,7 +28,7 @@ from __future__ import annotations
 import json, re
 from pathlib import Path
 
-from benchmark.repos import canonical_repo
+_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 _PAT = re.compile(
     r'github\.com/(?:repos/)?([^/\s]+)/([^/\s]+)/(issues?|pulls?|pull|commits?|commit)/([^\s/?#,)\]"\'<>]+)'
@@ -42,6 +42,13 @@ def normalize(url: str | None) -> str | None:
         return None
     u = url.strip().rstrip("/").lower()
     return u.split("?")[0].split("#")[0]
+
+
+def _load_repo_redirects(path: Path) -> dict:
+    """old owner/repo -> current owner/repo, lowercased (repo_redirects.json)."""
+    if not path.exists():
+        return {}
+    return {k.lower(): v.lower() for k, v in json.loads(path.read_text() or "{}").items()}
 
 
 def parse_url(url: str | None):
@@ -58,13 +65,15 @@ def _commit_prefix_eq(a: str, b: str) -> bool:
     return n >= 7 and a[:n] == b[:n]
 
 
-def _entity_match(pred_parts, gold_repo: str, gold_id: str, gold_type: str) -> bool:
+def _entity_match(pred_parts, gold_repo: str, gold_id: str, gold_type: str,
+                  renames: dict | None = None) -> bool:
     if not pred_parts:
         return False
     o, r, _t, i = pred_parts
     if gold_type == "commit":                       # SHA is globally unique -> repo-agnostic
         return _commit_prefix_eq(i, gold_id.lower())
-    same_repo = canonical_repo(f"{o}/{r}").lower() == canonical_repo(gold_repo).lower()  # renames
+    canon = (lambda x: (renames or {}).get(x, x))
+    same_repo = canon(f"{o}/{r}") == canon(gold_repo.lower())   # renamed repo == same repo
     return same_repo and i == gold_id.lower()   # repo-aware
 
 
@@ -77,19 +86,33 @@ class Scorer:
                 if line.strip():
                     r = json.loads(line)
                     self.gold[r["id"]] = r
-            data_dir = data_dir or gold_path.parent.parent   # data/gold/x.jsonl -> data/
-        if data_dir is None:                        # aliases-only mode (scoring by record)
-            data_dir = Path(__file__).resolve().parent / "data"
+            guess = gold_path.parent.parent             # data/gold/x.jsonl -> data/
+            if data_dir is None and (guess / "redirect_map.json").exists():
+                data_dir = guess
+        if data_dir is None:                        # e.g. extras/extended/gold.jsonl
+            data_dir = _DATA_DIR
+        data_dir = Path(data_dir)
+        self.renames = _load_repo_redirects(data_dir / "repo_redirects.json")
         self.aliases = {}
         for p in (redirect_map_path or data_dir / "redirect_map.json",
                   duplicates_path or data_dir / "duplicates.json"):
             p = Path(p)
             if p.exists():
                 for k, v in json.loads(p.read_text() or "{}").items():
-                    self.aliases[normalize(k)] = normalize(v)
+                    self.aliases[self._norm(k)] = self._norm(v)
+
+    def _norm(self, url: str | None) -> str | None:
+        """normalize() + renamed repos rewritten to their current name."""
+        n = normalize(url)
+        pp = parse_url(n)
+        if not pp:
+            return n
+        old = f"{pp[0]}/{pp[1]}"
+        new = self.renames.get(old)
+        return n.replace(f"github.com/{old}/", f"github.com/{new}/", 1) if new else n
 
     def _alias(self, url: str | None):
-        n = normalize(url)
+        n = self._norm(url)
         seen = set()
         while n in self.aliases and n not in seen:   # follow chains, guard cycles
             seen.add(n); n = self.aliases[n]
@@ -98,13 +121,13 @@ class Scorer:
     def _match_kind(self, predicted: str, g: dict) -> str | None:
         """Return how it matched: 'exact' (L1/L2), 'dup' (only via alias/redirect/
         duplicate), or None (no match)."""
-        npred = normalize(predicted)
+        npred = self._norm(predicted)
         targets = [g["gold_url"]] + ([g["original_url"]] if g.get("original_url") else [])
         # L1 URL / L2 entity -> exact
-        if any(npred == normalize(t) for t in targets):
+        if any(npred == self._norm(t) for t in targets):
             return "exact"
         pp = parse_url(predicted)
-        if _entity_match(pp, g["repo"], g["entity_id"], g["entity_type"]):
+        if _entity_match(pp, g["repo"], g["entity_id"], g["entity_type"], self.renames):
             return "exact"
         # L3 alias-resolve both sides -> dup
         apred = self._alias(predicted)
@@ -112,7 +135,7 @@ class Scorer:
             if apred == self._alias(t):
                 return "dup"
         pa = parse_url(apred)
-        if _entity_match(pa, g["repo"], g["entity_id"], g["entity_type"]):
+        if _entity_match(pa, g["repo"], g["entity_id"], g["entity_type"], self.renames):
             return "dup"
         return None
 
