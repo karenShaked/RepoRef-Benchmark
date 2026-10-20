@@ -86,7 +86,7 @@ differs from the current canonical URL (issue↔PR path, or a since-migrated rep
 
 ## Tools
 
-The benchmark ships the **21 read-only GitHub tools** an agent uses to resolve a reference.
+The benchmark ships the **22 read-only GitHub tools** (plus `submit_answer`) an agent uses to resolve a reference.
 They live in `benchmark/tools/` and are independent of any agent — load them directly:
 
 ```python
@@ -113,7 +113,7 @@ result = tools.execute("search_issues", {"query": "repo:cucumber/cucumber-jvm da
   provider LiteLLM supports: `provider`, `model_id`, `temperature`, `max_tokens`, optional
   `thinking_budget`/`reasoning_effort`), set its API key, and run `--model <your-key>`.
 - **Your own agent/strategy** — build any loop you like on `benchmark.tools.registry.ToolRegistry`
-  (the 22 read-only GitHub tools) and score with `benchmark.scorer.Scorer,`. Load examples with
+  (the 22 read-only GitHub tools + `submit_answer`) and score with `benchmark.scorer.Scorer,`. Load examples with
   `reporef.data.loader.load_examples("benchmark/data/main/instances.jsonl", "benchmark/data/gold/main.jsonl")`.
 
 Tool calls hit **live GitHub** and cache every response under `reporef/cache/`, so re-runs are

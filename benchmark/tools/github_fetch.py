@@ -10,6 +10,14 @@ from typing import Any, Dict, List, Optional
 from .github_search import GitHubSearchClient
 
 
+def _page_params(per_page: int, page: Optional[int]) -> Dict[str, Any]:
+    """per_page capped at GitHub's max (100); page only when requested."""
+    params: Dict[str, Any] = {"per_page": min(per_page, 100)}
+    if page:
+        params["page"] = page
+    return params
+
+
 class GitHubFetchClient:
     """Fetch individual GitHub artifacts (issue, PR, commit, file listing)."""
 
@@ -45,9 +53,10 @@ class GitHubFetchClient:
         repo: str,
         number: int,
         per_page: int = 10,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Get comments on an issue or PR."""
-        params = {"per_page": min(per_page, 30)}
+        params = _page_params(per_page, page)
         raw = self._client._get(
             f"/repos/{owner}/{repo}/issues/{number}/comments", params
         )
@@ -68,12 +77,18 @@ class GitHubFetchClient:
         state: str = "all",
         sort: str = "created",
         per_page: int = 10,
+        direction: str = "",
+        since: str = "",
+        labels: Optional[List[str]] = None,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
-        params = {
-            "state": state,
-            "sort": sort,
-            "per_page": min(per_page, 30),
-        }
+        params = {"state": state, "sort": sort, **_page_params(per_page, page)}
+        if direction:
+            params["direction"] = direction
+        if since:
+            params["since"] = since
+        if labels:
+            params["labels"] = labels if isinstance(labels, str) else ",".join(labels)
         raw = self._client._get(f"/repos/{owner}/{repo}/issues", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -89,6 +104,23 @@ class GitHubFetchClient:
                     "user": item.get("user", {}).get("login", ""),
                     "created_at": item.get("created_at", ""),
                 },
+            })
+        return {"total_count": len(items), "items": items}
+
+    def get_sub_issues(
+        self, owner: str, repo: str, number: int,
+        per_page: int = 10, page: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """List sub-issues of an issue."""
+        raw = self._client._get(f"/repos/{owner}/{repo}/issues/{number}/sub_issues",
+                                _page_params(per_page, page))
+        items = []
+        for item in raw if isinstance(raw, list) else []:
+            items.append({
+                "url": item.get("html_url", ""),
+                "title": item.get("title", ""),
+                "number": item.get("number"),
+                "state": item.get("state"),
             })
         return {"total_count": len(items), "items": items}
 
@@ -123,9 +155,31 @@ class GitHubFetchClient:
             },
         }
 
-    def get_pull_request_diff(self, owner: str, repo: str, number: int) -> Dict[str, Any]:
+    def get_pull_request_status(self, owner: str, repo: str, number: int) -> Dict[str, Any]:
+        """Combined commit status of a pull request's head commit."""
+        pr = self._client._get(f"/repos/{owner}/{repo}/pulls/{number}")
+        sha = (pr.get("head") or {}).get("sha", "")
+        if not sha:
+            return {"error": "pull request head commit not found"}
+        raw = self._client._get(f"/repos/{owner}/{repo}/commits/{sha}/status")
+        return {
+            "sha": sha,
+            "state": raw.get("state", ""),
+            "statuses": [
+                {"context": st.get("context", ""), "state": st.get("state", ""),
+                 "description": (st.get("description") or "")[:200]}
+                for st in raw.get("statuses", [])
+            ],
+        }
+
+    def get_pull_request_diff(
+        self, owner: str, repo: str, number: int,
+        per_page: Optional[int] = None, page: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Get the diff/files changed in a pull request."""
-        raw = self._client._get(f"/repos/{owner}/{repo}/pulls/{number}/files")
+        # No params unless asked: GitHub's default (30) and existing cache keys.
+        params = _page_params(per_page or 30, page) if (per_page or page) else {}
+        raw = self._client._get(f"/repos/{owner}/{repo}/pulls/{number}/files", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
             items.append({
@@ -145,13 +199,19 @@ class GitHubFetchClient:
         state: str = "all",
         sort: str = "created",
         per_page: int = 10,
+        direction: str = "",
+        head: str = "",
+        base: str = "",
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """List pull requests in a repository."""
-        params = {
-            "state": state,
-            "sort": sort,
-            "per_page": min(per_page, 30),
-        }
+        params = {"state": state, "sort": sort, **_page_params(per_page, page)}
+        if direction:
+            params["direction"] = direction
+        if head:
+            params["head"] = head
+        if base:
+            params["base"] = base
         raw = self._client._get(f"/repos/{owner}/{repo}/pulls", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -173,9 +233,10 @@ class GitHubFetchClient:
 
     def get_pull_request_reviews(
         self, owner: str, repo: str, number: int, per_page: int = 10,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """List reviews on a pull request."""
-        params = {"per_page": min(per_page, 30)}
+        params = _page_params(per_page, page)
         raw = self._client._get(f"/repos/{owner}/{repo}/pulls/{number}/reviews", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -190,9 +251,10 @@ class GitHubFetchClient:
 
     def get_pull_request_review_comments(
         self, owner: str, repo: str, number: int, per_page: int = 10,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Get line-level review comments on a pull request."""
-        params = {"per_page": min(per_page, 30)}
+        params = _page_params(per_page, page)
         raw = self._client._get(f"/repos/{owner}/{repo}/pulls/{number}/comments", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -236,9 +298,10 @@ class GitHubFetchClient:
         since: str = "",
         until: str = "",
         per_page: int = 10,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """List commits in a repository, optionally filtered."""
-        params: Dict[str, Any] = {"per_page": min(per_page, 30)}
+        params: Dict[str, Any] = _page_params(per_page, page)
         if sha:
             params["sha"] = sha
         if author:
@@ -269,10 +332,10 @@ class GitHubFetchClient:
     # ------------------------------------------------------------------
 
     def list_branches(
-        self, owner: str, repo: str, per_page: int = 30
+        self, owner: str, repo: str, per_page: int = 30, page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """List branches in a repository."""
-        params = {"per_page": min(per_page, 100)}
+        params = _page_params(per_page, page)
         raw = self._client._get(f"/repos/{owner}/{repo}/branches", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -288,10 +351,10 @@ class GitHubFetchClient:
     # ------------------------------------------------------------------
 
     def list_tags(
-        self, owner: str, repo: str, per_page: int = 30
+        self, owner: str, repo: str, per_page: int = 30, page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """List tags in a repository."""
-        params = {"per_page": min(per_page, 100)}
+        params = _page_params(per_page, page)
         raw = self._client._get(f"/repos/{owner}/{repo}/tags", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -331,10 +394,10 @@ class GitHubFetchClient:
     # ------------------------------------------------------------------
 
     def list_releases(
-        self, owner: str, repo: str, per_page: int = 10
+        self, owner: str, repo: str, per_page: int = 10, page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """List releases in a repository."""
-        params = {"per_page": min(per_page, 30)}
+        params = _page_params(per_page, page)
         raw = self._client._get(f"/repos/{owner}/{repo}/releases", params)
         items = []
         for item in raw if isinstance(raw, list) else []:
@@ -389,9 +452,11 @@ class GitHubFetchClient:
     # Labels
     # ------------------------------------------------------------------
 
-    def list_labels(self, owner: str, repo: str, per_page: int = 30) -> Dict[str, Any]:
+    def list_labels(
+        self, owner: str, repo: str, per_page: int = 30, page: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """List labels in a repository."""
-        params = {"per_page": min(per_page, 100)}
+        params = _page_params(per_page, page)
         raw = self._client._get(f"/repos/{owner}/{repo}/labels", params)
         items = []
         for item in raw if isinstance(raw, list) else []:

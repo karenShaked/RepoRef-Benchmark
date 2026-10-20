@@ -33,6 +33,11 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", default="predictions.jsonl")
     ap.add_argument("--runs-dir", default="runs")
+    ap.add_argument("--skip-preflight", action="store_true",
+                     help="Skip the live credential check (GitHub token + one 1-token "
+                          "completion ping) before starting. Off by default — a "
+                          "present-but-dead token should fail in one cheap call, not "
+                          "partway through a paid split.")
     args = ap.parse_args()
 
     import yaml
@@ -46,7 +51,13 @@ def main():
     model_cfg = models[args.model]
 
     token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
+
+    # Live credential check — not just "is the env var set", but "does it
+    # actually authenticate". See runners/preflight.py for why this exists.
+    if not args.skip_preflight:
+        from .runners.preflight import run_preflight
+        run_preflight({args.model: model_cfg}, token)
+    elif not token:
         print("warning: GITHUB_TOKEN not set — tool calls will only work from cache",
               file=sys.stderr)
 

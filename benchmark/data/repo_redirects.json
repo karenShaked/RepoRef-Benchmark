@@ -1,0 +1,8 @@
+{
+  "docelic/fluence": "crystallabs/fluence",
+  "facebook/react": "react/react",
+  "facebook/react-native": "react/react-native",
+  "fossasia/labs.fossasia.org": "FOSSASIA-Web/labs.fossasia.org",
+  "marionettejs/backbone.marionette": "marionettejs/marionette",
+  "patrickjs/patrickjs-starter": "PatrickJS/angular-webpack-starter"
+}

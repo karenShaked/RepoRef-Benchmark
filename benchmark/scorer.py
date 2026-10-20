@@ -9,6 +9,8 @@ Matching is lenient about *URL form* but strict about *which artifact*:
                        so issue #5831 in a different project is NOT accepted);
                        commits: SHA match (7+ char prefix), repo-agnostic because
                        a commit SHA is globally-unique content shared across forks.
+      Renamed repos (repo_redirects.json, e.g. facebook/react -> react/react)
+      count as the same repo.
   L3  alias resolve .. repo migrations (redirect_map.json) and closed-as-duplicate
                        artifacts (duplicates.json) are resolved, then L1/L2 re-checked.
 
@@ -25,6 +27,8 @@ CLI:
 from __future__ import annotations
 import json, re
 from pathlib import Path
+
+from benchmark.repos import canonical_repo
 
 _PAT = re.compile(
     r'github\.com/(?:repos/)?([^/\s]+)/([^/\s]+)/(issues?|pulls?|pull|commits?|commit)/([^\s/?#,)\]"\'<>]+)'
@@ -60,7 +64,8 @@ def _entity_match(pred_parts, gold_repo: str, gold_id: str, gold_type: str) -> b
     o, r, _t, i = pred_parts
     if gold_type == "commit":                       # SHA is globally unique -> repo-agnostic
         return _commit_prefix_eq(i, gold_id.lower())
-    return f"{o}/{r}" == gold_repo.lower() and i == gold_id.lower()   # repo-aware
+    same_repo = canonical_repo(f"{o}/{r}").lower() == canonical_repo(gold_repo).lower()  # renames
+    return same_repo and i == gold_id.lower()   # repo-aware
 
 
 class Scorer:

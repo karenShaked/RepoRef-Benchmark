@@ -81,13 +81,20 @@ class GitHubSearchClient:
         sort: str = "best-match",
         per_page: int = 10,
         extra_headers: Optional[Dict[str, str]] = None,
+        order: Optional[str] = None,
+        page: Optional[int] = None,
+        _retry: bool = True,
     ) -> Dict:
         params: Dict[str, Any] = {
             "q": query,
-            "per_page": min(per_page, 30),
+            "per_page": min(per_page, 100),
         }
         if sort != "best-match":
             params["sort"] = sort
+        if order:
+            params["order"] = order
+        if page:
+            params["page"] = page
 
         # Check cache
         cache_key = self._cache_key(f"search/{endpoint}", params)
@@ -107,19 +114,20 @@ class GitHubSearchClient:
             headers=headers,
         )
 
-        if response.status_code == 403:
+        if response.status_code == 403 and _retry:
             # Rate limit exceeded — wait and retry once
             reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
             wait = max(reset_time - time.time(), 60)
             time.sleep(min(wait, 120))
-            return self._search(endpoint, query, sort, per_page)
+            return self._search(endpoint, query, sort, per_page,
+                                extra_headers, order, page, _retry=False)
 
         response.raise_for_status()
         data = response.json()
         self._set_cached(cache_key, data)
         return data
 
-    def _get(self, path: str, params: Optional[Dict] = None) -> Dict:
+    def _get(self, path: str, params: Optional[Dict] = None, _retry: bool = True) -> Dict:
         """Generic GET for non-search endpoints."""
         params = params or {}
         cache_key = self._cache_key(path, params)
@@ -130,11 +138,11 @@ class GitHubSearchClient:
         self._rate_limit_wait()
         response = self.session.get(f"{self.BASE_URL}{path}", params=params)
 
-        if response.status_code == 403:
+        if response.status_code == 403 and _retry:
             reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
             wait = max(reset_time - time.time(), 60)
             time.sleep(min(wait, 120))
-            return self._get(path, params)
+            return self._get(path, params, _retry=False)
 
         response.raise_for_status()
         data = response.json()
@@ -158,8 +166,11 @@ class GitHubSearchClient:
         sort: str = "best-match",
         per_page: int = 10,
         cutoff_date: Optional[str] = None,
+        order: Optional[str] = None,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
-        raw = self._search("issues", self._apply_cutoff(query, cutoff_date), sort, per_page)
+        raw = self._search("issues", self._apply_cutoff(query, cutoff_date), sort, per_page,
+                           order=order, page=page)
         return {
             "total_count": raw.get("total_count", 0),
             "items": self._normalize_issues(raw.get("items", [])),
@@ -172,9 +183,11 @@ class GitHubSearchClient:
         sort: str = "best-match",
         per_page: int = 10,
         cutoff_date: Optional[str] = None,
+        order: Optional[str] = None,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         # Note: code search doesn't support created: qualifier, so cutoff is not applied
-        raw = self._search("code", query, sort, per_page)
+        raw = self._search("code", query, sort, per_page, order=order, page=page)
         return {
             "total_count": raw.get("total_count", 0),
             "items": self._normalize_code(raw.get("items", [])),
@@ -187,6 +200,8 @@ class GitHubSearchClient:
         sort: str = "best-match",
         per_page: int = 10,
         cutoff_date: Optional[str] = None,
+        order: Optional[str] = None,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         # For commits, use author-date qualifier instead of created
         if cutoff_date:
@@ -194,6 +209,7 @@ class GitHubSearchClient:
         raw = self._search(
             "commits", query, sort, per_page,
             extra_headers={"Accept": "application/vnd.github.cloak-preview+json"},
+            order=order, page=page,
         )
         return {
             "total_count": raw.get("total_count", 0),
@@ -206,8 +222,10 @@ class GitHubSearchClient:
         query: str,
         sort: str = "best-match",
         per_page: int = 10,
+        order: Optional[str] = None,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
-        raw = self._search("repositories", query, sort, per_page)
+        raw = self._search("repositories", query, sort, per_page, order=order, page=page)
         return {
             "total_count": raw.get("total_count", 0),
             "items": self._normalize_repos(raw.get("items", [])),
@@ -219,9 +237,11 @@ class GitHubSearchClient:
         query: str,
         sort: str = "best-match",
         per_page: int = 10,
+        order: Optional[str] = None,
+        page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Search GitHub users."""
-        raw = self._search("users", query, sort, per_page)
+        raw = self._search("users", query, sort, per_page, order=order, page=page)
         items = []
         for item in raw.get("items", []):
             items.append({

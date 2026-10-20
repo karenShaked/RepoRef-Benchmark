@@ -1,9 +1,9 @@
 """
 Tool registry — defines all available tools and dispatches execution.
 
-Exactly mirrors the GitHub MCP server read-only tools (21 tools + submit_answer):
-  Search:   search_issues, search_code, search_pull_requests, search_repositories,
-            search_users
+GitHub MCP server read-only tools (22 tools + submit_answer):
+  Search:   search_issues, search_code, search_pull_requests, search_commits,
+            search_repositories, search_users
   Issues:   issue_read, list_issues
   PRs:      pull_request_read, list_pull_requests
   Commits:  get_commit, list_commits
@@ -18,6 +18,7 @@ Exactly mirrors the GitHub MCP server read-only tools (21 tools + submit_answer)
 import json
 from typing import Any, Dict, List, Optional
 
+from benchmark.repos import canonical_repo, canonicalize_query, has_repo_qualifier
 from .github_search import GitHubSearchClient
 from .github_fetch import GitHubFetchClient
 
@@ -187,6 +188,58 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "search_commits",
+        "description": (
+            "Search for commits in GitHub repositories using commits search syntax "
+            "(e.g. author:, committer:, author-date:, merge:)"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query using GitHub commits search syntax",
+                },
+                "owner": {
+                    "type": "string",
+                    "description": (
+                        "Optional repository owner. If provided with repo, "
+                        "only commits for this repository are searched."
+                    ),
+                },
+                "repo": {
+                    "type": "string",
+                    "description": (
+                        "Optional repository name. If provided with owner, "
+                        "only commits for this repository are searched."
+                    ),
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["author-date", "committer-date"],
+                    "description": "Sort field, defaults to best match",
+                },
+                "order": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "description": "Sort order",
+                },
+                "perPage": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Results per page for pagination (min 1, max 100)",
+                },
+                "page": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Page number for pagination (min 1)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "search_repositories",
         "description": (
             "Find GitHub repositories by name, description, readme, topics, "
@@ -319,8 +372,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "list_issues",
         "description": (
             "List issues in a GitHub repository. For pagination, use the "
-            "'endCursor' from the previous response's 'pageInfo' in the "
-            "'after' parameter."
+            "'page' parameter."
         ),
         "parameters": {
             "type": "object",
@@ -365,6 +417,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "minimum": 1,
                     "maximum": 100,
                     "description": "Results per page for pagination (min 1, max 100)",
+                },
+                "page": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Page number for pagination (min 1)",
                 },
             },
             "required": ["owner", "repo"],
@@ -488,7 +545,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "list_commits",
         "description": (
             "Get list of commits of a branch in a GitHub repository. "
-            "Returns at least 30 results per page by default, but can "
+            "Returns 10 results per page by default, but can "
             "return more if specified using the perPage parameter (up to 100)."
         ),
         "parameters": {
@@ -506,6 +563,20 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "author": {
                     "type": "string",
                     "description": "Author username or email address to filter commits by",
+                },
+                "since": {
+                    "type": "string",
+                    "description": (
+                        "Only commits after this date (ISO 8601 timestamp, "
+                        "e.g. 2015-01-07T00:00:00Z)"
+                    ),
+                },
+                "until": {
+                    "type": "string",
+                    "description": (
+                        "Only commits before this date (ISO 8601 timestamp, "
+                        "e.g. 2015-01-08T00:00:00Z)"
+                    ),
                 },
                 "perPage": {
                     "type": "integer",
@@ -872,9 +943,20 @@ class ToolRegistry:
                     )
                 }
 
+            # Renamed repos: search rejects the old name, so use the current one.
+            arguments = dict(arguments)
+            if owner and repo:
+                owner, repo = canonical_repo(f"{owner}/{repo}").split("/", 1)
+                arguments["owner"], arguments["repo"] = owner, repo
+            if query:
+                arguments["query"] = canonicalize_query(query)
+
             # ------ Search ------
             if tool_name == "search_issues":
                 q = arguments["query"]
+                # The schema advertises owner/repo; scope the query with them.
+                if owner and repo and not has_repo_qualifier(q):
+                    q = f"repo:{owner}/{repo} {q}"
                 if "is:issue" not in q:
                     q = f"is:issue {q}"
                 return self._scrub_search_results(
@@ -883,6 +965,8 @@ class ToolRegistry:
                         sort=arguments.get("sort", "best-match"),
                         per_page=arguments.get("perPage", 10),
                         cutoff_date=self._cutoff_date,
+                        order=arguments.get("order"),
+                        page=arguments.get("page"),
                     )
                 )
             elif tool_name == "search_code":
@@ -892,23 +976,29 @@ class ToolRegistry:
                         sort=arguments.get("sort", "best-match"),
                         per_page=arguments.get("perPage", 10),
                         cutoff_date=self._cutoff_date,
+                        order=arguments.get("order"),
+                        page=arguments.get("page"),
                     )
                 )
             elif tool_name == "search_commits":
-                # tools.yaml advertises search_commits to the model; the
-                # earlier dispatcher omitted this branch, returning
-                # "Unknown tool: search_commits" — affecting ~38 runs
-                # mostly on commit-type examples.
+                q = arguments["query"]
+                if owner and repo and not has_repo_qualifier(q):
+                    q = f"repo:{owner}/{repo} {q}"
                 return self._scrub_search_results(
                     self._search_client.search_commits(
-                        query=arguments["query"],
+                        query=q,
                         sort=arguments.get("sort", "best-match"),
                         per_page=arguments.get("perPage", 10),
                         cutoff_date=self._cutoff_date,
+                        order=arguments.get("order"),
+                        page=arguments.get("page"),
                     )
                 )
             elif tool_name == "search_pull_requests":
                 q = arguments["query"]
+                # The schema advertises owner/repo; scope the query with them.
+                if owner and repo and not has_repo_qualifier(q):
+                    q = f"repo:{owner}/{repo} {q}"
                 if "is:pr" not in q:
                     q = f"is:pr {q}"
                 return self._scrub_search_results(
@@ -917,6 +1007,8 @@ class ToolRegistry:
                         sort=arguments.get("sort", "best-match"),
                         per_page=arguments.get("perPage", 10),
                         cutoff_date=self._cutoff_date,
+                        order=arguments.get("order"),
+                        page=arguments.get("page"),
                     )
                 )
             elif tool_name == "search_repositories":
@@ -925,13 +1017,20 @@ class ToolRegistry:
                         query=arguments["query"],
                         sort=arguments.get("sort", "best-match"),
                         per_page=arguments.get("perPage", 10),
+                        order=arguments.get("order"),
+                        page=arguments.get("page"),
                     )
                 )
             elif tool_name == "search_users":
+                q = arguments["query"]
+                if "type:" not in q:
+                    q = f"type:user {q}"
                 return self._search_client.search_users(
-                    query=arguments["query"],
+                    query=q,
                     sort=arguments.get("sort", "best-match"),
                     per_page=arguments.get("perPage", 10),
+                    order=arguments.get("order"),
+                    page=arguments.get("page"),
                 )
 
             # ------ Issues (bundled: issue_read) ------
@@ -939,11 +1038,12 @@ class ToolRegistry:
                 method = arguments["method"]
                 o, r, n = arguments["owner"], arguments["repo"], arguments["issue_number"]
                 pp = arguments.get("perPage", 10)
+                pg = arguments.get("page")
                 if method == "get":
                     return self._fetch_client.get_issue(owner=o, repo=r, number=n)
                 elif method == "get_comments":
                     return self._fetch_client.get_issue_comments(
-                        owner=o, repo=r, number=n, per_page=pp,
+                        owner=o, repo=r, number=n, per_page=pp, page=pg,
                     )
                 elif method == "get_labels":
                     issue = self._fetch_client.get_issue(owner=o, repo=r, number=n)
@@ -951,7 +1051,9 @@ class ToolRegistry:
                         "labels": issue.get("metadata", {}).get("labels", []),
                     }
                 elif method == "get_sub_issues":
-                    return {"items": [], "note": "Sub-issues not supported via REST API"}
+                    return self._fetch_client.get_sub_issues(
+                        owner=o, repo=r, number=n, per_page=pp, page=pg,
+                    )
                 else:
                     return {"error": f"Unknown issue_read method: {method}"}
 
@@ -972,6 +1074,10 @@ class ToolRegistry:
                     state=state,
                     sort=sort,
                     per_page=arguments.get("perPage", 10),
+                    direction=arguments.get("direction", "").lower(),
+                    since=arguments.get("since", ""),
+                    labels=arguments.get("labels"),
+                    page=arguments.get("page"),
                 )
 
             # ------ Pull Requests (bundled: pull_request_read) ------
@@ -980,24 +1086,30 @@ class ToolRegistry:
                 o, r = arguments["owner"], arguments["repo"]
                 n = arguments["pullNumber"]
                 pp = arguments.get("perPage", 10)
+                pg = arguments.get("page")
                 if method == "get":
                     return self._fetch_client.get_pull_request(owner=o, repo=r, number=n)
                 elif method in ("get_diff", "get_files"):
-                    return self._fetch_client.get_pull_request_diff(owner=o, repo=r, number=n)
+                    return self._fetch_client.get_pull_request_diff(
+                        owner=o, repo=r, number=n,
+                        per_page=arguments.get("perPage"), page=pg,
+                    )
                 elif method == "get_reviews":
                     return self._fetch_client.get_pull_request_reviews(
-                        owner=o, repo=r, number=n, per_page=pp,
+                        owner=o, repo=r, number=n, per_page=pp, page=pg,
                     )
                 elif method == "get_review_comments":
                     return self._fetch_client.get_pull_request_review_comments(
-                        owner=o, repo=r, number=n, per_page=pp,
+                        owner=o, repo=r, number=n, per_page=pp, page=pg,
                     )
                 elif method == "get_comments":
                     return self._fetch_client.get_issue_comments(
-                        owner=o, repo=r, number=n, per_page=pp,
+                        owner=o, repo=r, number=n, per_page=pp, page=pg,
                     )
                 elif method == "get_status":
-                    return {"note": "Commit status check not yet implemented"}
+                    return self._fetch_client.get_pull_request_status(
+                        owner=o, repo=r, number=n,
+                    )
                 else:
                     return {"error": f"Unknown pull_request_read method: {method}"}
 
@@ -1008,6 +1120,11 @@ class ToolRegistry:
                     state=arguments.get("state", "all"),
                     sort=arguments.get("sort", "created"),
                     per_page=arguments.get("perPage", 10),
+                    direction=arguments.get("direction", ""),
+                    head=(h if ":" in (h := arguments.get("head", "")) or not h
+                          else f"{arguments['owner']}:{h}"),
+                    base=arguments.get("base", ""),
+                    page=arguments.get("page"),
                 )
 
             # ------ Commits ------
@@ -1026,6 +1143,7 @@ class ToolRegistry:
                     since=arguments.get("since", ""),
                     until=arguments.get("until", ""),
                     per_page=arguments.get("perPage", 10),
+                    page=arguments.get("page"),
                 )
 
             # ------ Branches ------
@@ -1034,6 +1152,7 @@ class ToolRegistry:
                     owner=arguments["owner"],
                     repo=arguments["repo"],
                     per_page=arguments.get("perPage", 30),
+                    page=arguments.get("page"),
                 )
 
             # ------ Tags ------
@@ -1042,6 +1161,7 @@ class ToolRegistry:
                     owner=arguments["owner"],
                     repo=arguments["repo"],
                     per_page=arguments.get("perPage", 30),
+                    page=arguments.get("page"),
                 )
             elif tool_name == "get_tag":
                 return self._fetch_client.get_tag(
@@ -1056,6 +1176,7 @@ class ToolRegistry:
                     owner=arguments["owner"],
                     repo=arguments["repo"],
                     per_page=arguments.get("perPage", 10),
+                    page=arguments.get("page"),
                 )
             elif tool_name == "get_latest_release":
                 return self._fetch_client.get_latest_release(
@@ -1074,6 +1195,8 @@ class ToolRegistry:
                 return self._fetch_client.list_labels(
                     owner=arguments["owner"],
                     repo=arguments["repo"],
+                    per_page=arguments.get("perPage", 30),
+                    page=arguments.get("page"),
                 )
             elif tool_name == "get_label":
                 return self._fetch_client.get_label(
